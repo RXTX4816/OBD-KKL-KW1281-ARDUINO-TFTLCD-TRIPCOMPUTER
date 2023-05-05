@@ -33,6 +33,7 @@ const uint8_t ADDR_ENGINE = 0x01;
 const uint8_t ADDR_ABS_BRAKES = 0x03; // UNUSED
 const uint8_t ADDR_AUTO_HVAC = 0x08;  // UNUSED
 const uint8_t ADDR_INSTRUMENTS = 0x17;
+const uint8_t ADDR_CENTRAL_CONV = 0x46;
 
 /* Pins */
 uint8_t pin_rx = 19; // Receive // Black
@@ -82,6 +83,7 @@ int connection_attempts_counter = 0;
 unsigned long button_read_time = 0;
 unsigned long connect_time_start = 0;
 unsigned long timeout_to_add = 1100; // Wikipedia
+unsigned long button_press_delay = 222;
 // Menu 0 Cockpit view
 int engine_rpm_x1 = cols[20];
 int engine_rpm_y1 = rows[7];
@@ -2533,8 +2535,10 @@ void setup()
     bool userinput_simulation_mode_previous = true;
     uint16_t userinput_baudrate = 9600;
     uint16_t userinput_baudrate_previous = 9600;
-    uint16_t supported_baud_rates[3] = {4800, 9600, 10400}; // Select Baud rate: 4800, 9600 or 10400 Baud depending on your ECU. This can get confusing and the ECU may switch the baud rate after connecting.
-    uint8_t supported_baud_rates_counter = 1;
+    uint8_t supported_baud_rates_max = 4;
+    uint8_t supported_baud_rates_length = supported_baud_rates_max+1;
+    uint16_t supported_baud_rates[supported_baud_rates_length] = {1200, 2400, 4800, 9600, 10400}; // Select Baud rate: 4800, 9600 or 10400 Baud depending on your ECU. This can get confusing and the ECU may switch the baud rate after connecting.
+    uint8_t supported_baud_rates_counter = 3;
     bool userinput_debug_mode = true;
     bool userinput_debug_mode_previous = true;
     uint8_t userinput_ecu_address = 17; // 1 or 17
@@ -2630,7 +2634,7 @@ void setup()
             }
             else if (right_click() && userinput_current_row == 11)
             {
-                if (supported_baud_rates_counter >= 2)
+                if (supported_baud_rates_counter >= supported_baud_rates_max)
                     supported_baud_rates_counter = 0;
                 else
                     supported_baud_rates_counter++;
@@ -2640,7 +2644,7 @@ void setup()
             else if (left_click() && userinput_current_row == 11)
             {
                 if (supported_baud_rates_counter <= 0)
-                    supported_baud_rates_counter = 2;
+                    supported_baud_rates_counter = supported_baud_rates_max;
                 else
                     supported_baud_rates_counter--;
                 userinput_baudrate = supported_baud_rates[supported_baud_rates_counter];
@@ -2702,7 +2706,7 @@ void setup()
             if (setup_config_button_pressed)
             {
                 setup_config_button_pressed = false;
-                delay(333);
+                delay(button_press_delay);
             }
         }
         // Update values
