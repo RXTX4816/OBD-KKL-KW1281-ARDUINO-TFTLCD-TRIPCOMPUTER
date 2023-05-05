@@ -1492,16 +1492,15 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
     uint16_t temp_iteration_counter = 0;
     while ((recvcount == 0) || (recvcount != size))
     {
-        if (debug_mode_enabled && temp_iteration_counter == recvcount)
-        {
-            Serial.print(F("      Iter: "));
-            Serial.print(temp_iteration_counter);
-            Serial.print(F(" receivecount: "));
-            Serial.println(recvcount);
-        }
-
         while (obd.available())
         {
+            if (debug_mode_enabled && temp_iteration_counter == recvcount)
+            {
+                Serial.print(F("      Iter: "));
+                Serial.print(temp_iteration_counter);
+                Serial.print(F(" receivecount: "));
+                Serial.println(recvcount);
+            }
             data = obdRead();
             if (data == -1)
             {
