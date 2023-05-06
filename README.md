@@ -14,6 +14,10 @@ Requirements: Arduino Mega (ATmega2560-16AU CH340G), 3.5" TFT LCD Module shield 
 
 Look inside the OBD cable and note which MCU is placed (E.g. FT232R or FT232RQ), get its datasheet, find the RXD and TXD pins, solder the first visible contact point to your Arduino digital pins of your liking (Here: 19 and 18 = RX1 & TX1) and cut both lines after the contact point. Don't forget to solder the +5V and GROUND from your Arduino to the OBD cable MCU (Just use the USB stripped male on the platine) since without it no communication is possible. You should have 4 cables connected between your OBD cable and your Arduino and a seperate USB or power souce input to power the Arduino and access its Serial debug communication.
 
+```
+Not all pins on the Mega and Mega 2560 boards support change interrupts, so only the following can be used for RX: 10, 11, 12, 13, 14, 15, 50, 51, 52, 53, A8 (62), A9 (63), A10 (64), A11 (65), A12 (66), A13 (67), A14 (68), A15 (69). Not all pins on the Leonardo and Micro boards support change interrupts, so only the following can be used for RX: 8, 9, 10, 11, 14 (MISO), 15 (SCK), 16 (MOSI).
+```
+
 See the pictures below for visual guidance.
 
 ![](assets/FT232RQ_pinout.jpg)
