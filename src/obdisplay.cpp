@@ -36,8 +36,8 @@ const uint8_t ADDR_INSTRUMENTS = 0x17;
 const uint8_t ADDR_CENTRAL_CONV = 0x46;
 
 /* Pins */
-uint8_t pin_rx = 19; // Receive // Black
-uint8_t pin_tx = 18; // Transmit // White
+uint8_t pin_rx = 12; // Receive // Black
+uint8_t pin_tx = 11; // Transmit // White
 // Five direction joystick
 const int buttonPin_RST = 13; // reset
 const int buttonPin_SET = 2;  // set
