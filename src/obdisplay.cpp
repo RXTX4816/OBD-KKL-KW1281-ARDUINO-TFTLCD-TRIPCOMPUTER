@@ -2578,7 +2578,7 @@ void setup()
                 }
                 else if (userinput_current_row > 13)
                 {
-                    userinput_current_row = 12;
+                    userinput_current_row = 13;
                 }
                 else
                 {
