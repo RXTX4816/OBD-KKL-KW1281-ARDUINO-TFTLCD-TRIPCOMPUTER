@@ -11,9 +11,6 @@ Ignore compile warnings.
 // Arduino/Standard Libraries
 
 #include <Arduino.h>
-#include <Wire.h>
-#include <time.h>
-// #include <EEPROM.h>
 //  Third party libraries
 #include "NewSoftwareSerial.h"
 #include "UTFT.h"
@@ -21,7 +18,11 @@ Ignore compile warnings.
 /* --------------------------EDIT THE FOLLOWING TO YOUR LIKING-------------------------------------- */
 
 /* Config */
-#define DEBUG 1             // 1 = enable Serial.print
+#define DEBUG 1                  // 1 = enable Serial.print
+#define ECU_TIMEOUT 1300         // Most commonly is 1100ms
+#define DISPLAY_FRAME_LENGTH 111 // Length of 1 frame in ms
+#define DISPLAY_MAX_X 480
+#define DISPLAY_MAX_Y 320
 bool no_input_mode = false; // If you have no buttons connected, mainly used for fast testing
 bool auto_setup = false;
 bool simulation_mode_active = false; // If simulation mode is active the device will display imaginary values
@@ -65,6 +66,9 @@ UTFT g(CTE40, 38, 39, 40, 41); // Graphics g
 word back_color = TFT_WHITE;
 word font_color = TFT_BLACK;
 String simulation_mode = "";
+const char CHAR_YES = 'Y';
+const char CHAR_NO = 'N';
+uint32_t display_frame_timestamp = millis();
 
 /* Menu:
 0: Main menu shows values
@@ -81,7 +85,7 @@ byte menu_last = menu;
 bool menu_switch = false;
 int connection_attempts_counter = 0;
 unsigned long button_read_time = 0;
-unsigned long connect_time_start = 0;
+unsigned long connect_time_start = millis();
 unsigned long timeout_to_add = 1100; // Wikipedia
 unsigned long button_press_delay = 222;
 // Menu 0 Cockpit view
@@ -278,15 +282,17 @@ bool fuel_per_hour_updated = false;
 #define debugstrnumhexln(str, num)
 #endif
 
-// Utility
-int random_integer(int min, int max)
+uint8_t count_digit(int n)
 {
-    return random(min, max);
-}
-
-float random_float()
-{
-    return 0.00;
+    if (n == 0)
+        return 1;
+    uint8_t count = 0;
+    while (n != 0)
+    {
+        n = n / 10;
+        ++count;
+    }
+    return count;
 }
 
 /**
@@ -299,44 +305,23 @@ String convert_bool_string(bool value)
 {
     if (value)
     {
-        return "Y";
+        return String(CHAR_YES);
     }
     else
     {
-        return "N";
+        return String(CHAR_NO);
     }
 }
 char convert_bool_char(bool value)
 {
     if (value)
     {
-        return 'Y';
+        return CHAR_YES;
     }
     else
-        return 'N';
+        return CHAR_NO;
 }
 
-String convert_int_to_string(int value)
-{
-    char result[15];
-    sprintf(result, "%d", value);
-    return result;
-}
-String convert_int_to_string(uint16_t value)
-{
-    char result[15];
-    sprintf(result, "%d", value);
-    return result;
-}
-
-String floatToString(float v)
-{
-    String res;
-    char buf[16];
-    dtostrf(v, 4, 2, buf);
-    res = String(buf);
-    return res;
-}
 // Button state functions
 bool reset_click()
 {
@@ -784,18 +769,6 @@ void display_row_test()
     }
 }
 
-/**
- * @brief Checks if the connection with the ECU is active. Function below converts 1 and 0 to "Y" and "N"
- */
-bool is_connected()
-{
-    return connected;
-}
-String is_connected_as_string()
-{
-    return convert_bool_string(is_connected());
-}
-
 void display_baud_rate()
 {
     g.printNumI(baud_rate, 60, rows[2], 5);
@@ -812,7 +785,7 @@ void display_block_counter()
 
 void display_obd_status()
 {
-    if (is_connected())
+    if (connected)
     {
         g.setColor(TFT_GREEN);
     }
@@ -820,7 +793,7 @@ void display_obd_status()
     {
         g.setColor(TFT_RED);
     }
-    g.print(is_connected_as_string(), 96, rows[1]);
+    g.print(String(connected), 96, rows[1]);
     if (obd.available() > 0)
         g.setColor(TFT_GREEN);
     else
@@ -1247,26 +1220,24 @@ void disconnect()
     debug(connected);
     debug(F(". Available: "));
     debugln(obd.available());
+
     block_counter = 0;
     connected = false;
     connect_time_start = 0;
     odometer_start = 0;
     fuel_level_start = 0;
-    // printDebug("Disconnected..");
     messages_counter = 0;
     row_debug_current = 25;
     menu = 0;
     menu_last = menu;
     menu_switch = false;
     button_read_time = 0;
-    // Save debug_messages before deleting
+    addr_selected = 0x00;
+
     debug_message_current = 0;
     g.fillScr(back_color);
     g.setColor(font_color);
-    delay(1222);
-    // screen_current = 0;
-    // menu_current = 0;
-    //  TODO Kommunikationsende prozedur
+    delay(2222);
 }
 
 /**
@@ -1282,13 +1253,13 @@ void obdWrite(uint8_t data)
     switch (baud_rate)
     {
     case 1200:
-        to_delay = 130;
+        to_delay = 25;
         break;
     case 2400:
-        to_delay = 60;
+        to_delay = 20;
         break;
     case 4800:
-        to_delay = 30;
+        to_delay = 15;
         break;
     case 9600:
         to_delay = 10;
@@ -1505,8 +1476,8 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
     if (size == 0)
         ackeachbyte = true;
 
-    debugstrnum(F(" - KWPReceiveBlock. Size: "), size);
-    debugstrnum(F(". Block counter: "), block_counter);
+    // debugstrnum(F(" - KWPReceiveBlock. Size: "), size);
+    // debugstrnum(F(". Block counter: "), block_counter);
 
     if (size > maxsize)
     {
@@ -1519,13 +1490,7 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
     {
         while (obd.available())
         {
-            if (temp_iteration_counter == recvcount)
-            {
-                debug(F("      Iter: "));
-                debug(temp_iteration_counter);
-                debug(F(" receivecount: "));
-                debugln(recvcount);
-            }
+
             data = obdRead();
             if (data == -1)
             {
@@ -1600,7 +1565,6 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
             if (((!ackeachbyte) && (recvcount == size)) || ((ackeachbyte) && (recvcount < size)))
             {
                 obdWrite(data ^ 0xFF); // send complement ack
-                delay(25);
                 /*uint8_t echo = obdRead();
                 if (echo != (data ^ 0xFF)){
                   Serial.print(F("ERROR: invalid echo "));
@@ -1612,10 +1576,10 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
             }
             timeout = millis() + timeout_to_add;
 
-            debugstrnum(F(" - KWPReceiveBlock: Added timeout. ReceiveCount: "), (uint8_t)recvcount);
-            debug(F(". Processed data: "));
+            debugstrnum(F("Rcvcnt: "), (uint8_t)recvcount);
+            debug(F(" Data: "));
             debughex(data);
-            debugstrnumln(F(". ACK compl: "), ((!ackeachbyte) && (recvcount == size)) || ((ackeachbyte) && (recvcount < size)));
+            // debugstrnumln(F(". ACK compl: "), ((!ackeachbyte) && (recvcount == size)) || ((ackeachbyte) && (recvcount < size)));
         }
 
         if (millis() >= timeout)
@@ -2603,12 +2567,13 @@ bool obd_connect()
         g.setColor(font_color);
         return false;
     }
-    draw_status_bar();
+    // draw_status_bar();
     char response[3] = {0, 0, 0}; // Response should be (0x55, 0x01, 0x8A)base=16 = (85 1 138)base=2
     int response_size = 3;
-    g.print("-> Handshake(hex)...", cols[0], rows[5]);
-    g.print("   Exp 55 01 8A Got ", cols[0], rows[6]);
-    if (!KWPReceiveBlock(response, 3, response_size, -1, true) & ((((uint8_t)response[0]) != 0x55) || (((uint8_t)response[1]) != 0x01) || (((uint8_t)response[2]) != 0x8A)))
+    // g.print("-> Handshake(hex)...", cols[0], rows[5]);
+    // g.print("   Exp 55 01 8A Got ", cols[0], rows[6]);
+
+    if (!KWPReceiveBlock(response, 3, response_size, -1, true))
     {
         draw_status_bar();
         g.setColor(TFT_RED);
@@ -2639,6 +2604,36 @@ bool obd_connect()
 
         return false;
     }
+
+    if (((((uint8_t)response[0]) != 0x55) || (((uint8_t)response[1]) != 0x01) || (((uint8_t)response[2]) != 0x8A)))
+    {
+        draw_status_bar();
+        g.setColor(TFT_RED);
+        String first = String((uint8_t)response[0], HEX);
+        String second = String((uint8_t)response[1], HEX);
+        String third = String((uint8_t)response[2], HEX);
+        g.print(first, cols[20], rows[6]);
+        g.print(second, cols[20] + 3 * 16 + 2, rows[6]);
+        g.print(third, cols[20] + 2 * (3 * 16 + 2), rows[6]);
+        g.print("ERROR", cols[20], rows[5]);
+        g.setColor(font_color);
+
+        debug(F("Handshake error expected ["));
+        debughex(0x55);
+        debug(F(" "));
+        debughex(0x01);
+        debug(F(" "));
+        debughex(0x8A);
+        debug(F("] got ["));
+        debughex((uint8_t)response[0]);
+        debug(F(" "));
+        debughex((uint8_t)response[1]);
+        debug(F(" "));
+        debughex((uint8_t)response[2]);
+        debugln(F("]"));
+
+        delay(1111);
+    }
     // draw_status_bar();
     // g.setColor(TFT_GREEN);
     // g.print("DONE", cols[20], rows[5]);
@@ -2646,10 +2641,9 @@ bool obd_connect()
     // g.setColor(TFT_BLUE);
     // draw_status_bar();
     // g.setColor(TFT_GREEN);
-    g.print("DONE", cols[18], rows[4]); // KWP 5 baud init done
+    //g.print("DONE", cols[18], rows[4]); // KWP 5 baud init done
     // g.setColor(TFT_BLUE);
     // g.print("-> Read ECU data...", LEFT, rows[8]);
-    debugln(F("ReadConnectBlocks"));
     if (!readConnectBlocks(true))
     {
         draw_status_bar();
@@ -2658,13 +2652,13 @@ bool obd_connect()
         g.setColor(font_color);
         return false;
     }
-    g.setColor(TFT_GREEN);
-    g.print("DONE", cols[19], rows[8]);
-    g.setColor(TFT_BLUE);
+    //g.setColor(TFT_GREEN);
+    //g.print("DONE", cols[19], rows[8]);
+    //g.setColor(TFT_BLUE);
     debugln(F("ECU connected"));
 
     connected = true;
-    draw_status_bar();
+    //draw_status_bar();
     g.setColor(TFT_GREEN);
     g.print("Connected!", 325, rows[15]);
     g.setColor(font_color);
