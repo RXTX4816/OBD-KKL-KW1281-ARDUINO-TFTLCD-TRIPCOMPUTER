@@ -2641,7 +2641,7 @@ bool obd_connect()
     // g.setColor(TFT_BLUE);
     // draw_status_bar();
     // g.setColor(TFT_GREEN);
-    //g.print("DONE", cols[18], rows[4]); // KWP 5 baud init done
+    // g.print("DONE", cols[18], rows[4]); // KWP 5 baud init done
     // g.setColor(TFT_BLUE);
     // g.print("-> Read ECU data...", LEFT, rows[8]);
     if (!readConnectBlocks(true))
@@ -2652,13 +2652,13 @@ bool obd_connect()
         g.setColor(font_color);
         return false;
     }
-    //g.setColor(TFT_GREEN);
-    //g.print("DONE", cols[19], rows[8]);
-    //g.setColor(TFT_BLUE);
+    // g.setColor(TFT_GREEN);
+    // g.print("DONE", cols[19], rows[8]);
+    // g.setColor(TFT_BLUE);
     debugln(F("ECU connected"));
 
     connected = true;
-    //draw_status_bar();
+    // draw_status_bar();
     g.setColor(TFT_GREEN);
     g.print("Connected!", 325, rows[15]);
     g.setColor(font_color);
@@ -3073,24 +3073,28 @@ void loop()
     }
     else
     {
-        draw_status_bar();
-        switch (menu)
+        if (millis() >= display_frame_timestamp)
         {
-        case 0:
-            display_menu_cockpit();
-            break;
-        case 1:
-            display_menu_experimental();
-            break;
-        case 2:
-            display_menu_debug();
-            break;
-        case 3:
-            display_menu_dtc();
-            break;
-        case 4:
-            display_menu_settings();
-            break;
+            draw_status_bar();
+            switch (menu)
+            {
+            case 0:
+                display_menu_cockpit();
+                break;
+            case 1:
+                display_menu_experimental();
+                break;
+            case 2:
+                display_menu_debug();
+                break;
+            case 3:
+                display_menu_dtc();
+                break;
+            case 4:
+                display_menu_settings();
+                break;
+            }
+            display_frame_timestamp = millis() + DISPLAY_FRAME_LENGTH;
         }
     }
 }
