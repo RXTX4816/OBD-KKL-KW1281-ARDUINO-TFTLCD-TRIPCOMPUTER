@@ -1232,7 +1232,6 @@ void disconnect()
     menu_last = menu;
     menu_switch = false;
     button_read_time = 0;
-    addr_selected = 0x00;
 
     debug_message_current = 0;
     g.fillScr(back_color);
@@ -1247,8 +1246,8 @@ void disconnect()
  */
 void obdWrite(uint8_t data)
 {
-    debug(F("->MCU: "));
-    debughexln(data);
+    //debug(F("->MCU: "));
+    //debughexln(data);
     uint8_t to_delay = 5;
     switch (baud_rate)
     {
@@ -1287,8 +1286,8 @@ uint8_t obdRead()
         }
     }
     uint8_t data = obd.read();
-    debug(F("ECU: "));
-    debughexln(data);
+    //debug(F("ECU: "));
+    //debughexln(data);
     return data;
 }
 
@@ -1353,7 +1352,7 @@ bool KWP5BaudInit(uint8_t addr)
 {
     debug(F("5 baud: (0)"));
     send5baud(addr);
-    debugln(F(" (9) END"));
+    //debugln(F(" (9) END"));
     return true;
 }
 
@@ -1415,7 +1414,7 @@ bool KWPSendBlock(char *s, int size)
 bool KWPSendAckBlock()
 {
 
-    debugstrnumln(F("---KWPSendAckBlock block counter = "), block_counter);
+    //debugstrnumln(F("---KWPSendAckBlock block counter = "), block_counter);
     char buf[32];
     buf[0] = 0x03;
     buf[1] = block_counter;
@@ -1576,9 +1575,9 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
             }
             timeout = millis() + timeout_to_add;
 
-            debugstrnum(F("Rcvcnt: "), (uint8_t)recvcount);
-            debug(F(" Data: "));
-            debughex(data);
+            //debugstrnum(F("Rcvcnt: "), (uint8_t)recvcount);
+            //debug(F(" Data: "));
+            //debughex(data);
             // debugstrnumln(F(". ACK compl: "), ((!ackeachbyte) && (recvcount == size)) || ((ackeachbyte) && (recvcount < size)));
         }
 
@@ -1604,15 +1603,15 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
         temp_iteration_counter++;
     }
     // show data
-    debug(F("IN: size = "));
-    debug(size);
-    debug(F(" data = "));
-    for (uint8_t i = 0; i < size; i++)
-    {
-        uint8_t data = s[i];
-        debughex(data);
-        debug(F(" "));
-    }
+    //debug(F("IN: size = "));
+    //debug(size);
+    //debug(F(" data = "));
+    //for (uint8_t i = 0; i < size; i++)
+    //{
+    //    uint8_t data = s[i];
+    //    debughex(data);
+    //    debug(F(" "));
+    //}
     debugln();
     increase_block_counter();
     return true;
@@ -1679,7 +1678,7 @@ bool KWPReceiveAckBlock()
  */
 bool readConnectBlocks(bool initialization_phase = false)
 {
-    debugln(F(" - Readconnectblocks"));
+    //debugln(F(" - Readconnectblocks"));
 
     String info;
     while (true)
@@ -1723,7 +1722,7 @@ bool readConnectBlocks(bool initialization_phase = false)
             return false;
         }
     }
-    debugstrnum(F("label = "), info);
+    //debugstrnum(F("label = "), info);
     return true;
 }
 
@@ -2553,12 +2552,12 @@ bool obd_connect()
     }
     g.print("OBD.begin()...", LEFT, rows[3]);
     draw_status_bar();
-    obd.begin(baud_rate); // Baud rate 9600 for Golf 4/Bora or 10400 in weird cases
     g.setColor(TFT_GREEN);
     g.print("DONE", cols[14], rows[3]);
     g.setColor(TFT_BLUE);
     g.print("-> KWP5BaudInit...", cols[0], rows[4]);
     debugln(F("Init "));
+    obd.begin(baud_rate); // Baud rate 9600 for Golf 4/Bora or 10400 in weird cases
     if (!KWP5BaudInit(addr_selected))
     {
         draw_status_bar();
