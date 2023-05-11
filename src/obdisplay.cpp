@@ -1585,7 +1585,6 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
                 {
                     debugstrnum(F(" - KWPReceiveBlock error: Invalid block counter. Expected: "), (uint8_t)data);
                     debugstrnumln(F(" Is: "), (uint8_t)block_counter);
-                    // printError("Block counter error. Expected " + String(data) + " is " + String(block_counter));
                     if (initialization_phase)
                     {
                         g.setColor(TFT_RED);
@@ -1630,7 +1629,6 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
             {
                 debugln(F("No connection to ECU! Check wiring."));
             }
-            // printError("KWPRecieve timeout error");
             if (initialization_phase)
             {
                 g.setColor(TFT_RED);
@@ -1718,18 +1716,17 @@ bool KWPReceiveAckBlock()
 bool readConnectBlocks(bool initialization_phase = false)
 {
     debugln(F(" - Readconnectblocks"));
+
     String info;
     while (true)
     {
         int size = 0;
         char s[64];
-        if (!(KWPReceiveBlock(s, 64, size, initialization_phase)))
+        if (!(KWPReceiveBlock(s, 64, size, -1, initialization_phase)))
         {
-            // printError("readConnectBlocks -> KWPReceiveBlock error");
             if (initialization_phase)
-            {
                 g.print("   ERROR receiving", cols[0], rows[9]);
-            }
+
             return false;
         }
         if (size == 0)
@@ -1738,7 +1735,6 @@ bool readConnectBlocks(bool initialization_phase = false)
             {
                 g.print("   ERROR size=0", cols[0], rows[9]);
             }
-            // printError("readConnectBlocks -> size is 0");
             return false;
         }
         if (s[2] == '\x09')
@@ -2584,7 +2580,13 @@ bool obd_connect()
 {
     debugln(F("Connecting to ECU"));
     block_counter = 0;
-    g.setColor(TFT_BLUE);
+    g.print("Press enter->", LEFT, rows[3]);
+    while (true)
+    {
+        draw_status_bar();
+        if (mid_click())
+            break;
+    }
     g.print("OBD.begin()...", LEFT, rows[3]);
     draw_status_bar();
     obd.begin(baud_rate); // Baud rate 9600 for Golf 4/Bora or 10400 in weird cases
@@ -2602,9 +2604,7 @@ bool obd_connect()
         return false;
     }
     draw_status_bar();
-    // printDebug("Init ADDR " + String(addr_selected) + " with " + baud_rate + " baud");
-    char response[3] = {0, 0, 0};
-    ; // Response should be 0x55, 0x01, 0x8A
+    char response[3] = {0, 0, 0}; // Response should be (0x55, 0x01, 0x8A)base=16 = (85 1 138)base=2
     int response_size = 3;
     g.print("-> Handshake(hex)...", cols[0], rows[5]);
     g.print("   Exp 55 01 8A Got ", cols[0], rows[6]);
@@ -2639,18 +2639,16 @@ bool obd_connect()
 
         return false;
     }
-    draw_status_bar();
-
-    g.setColor(TFT_GREEN);
-    debugln(F("KWP5BaudInit DONE"));
-    g.print("DONE", cols[20], rows[5]);
-    g.print("55 01 8A", cols[20], rows[6]);
-    g.setColor(TFT_BLUE);
-    draw_status_bar();
-    g.setColor(TFT_GREEN);
+    // draw_status_bar();
+    // g.setColor(TFT_GREEN);
+    // g.print("DONE", cols[20], rows[5]);
+    // g.print("55 01 8A", cols[20], rows[6]);
+    // g.setColor(TFT_BLUE);
+    // draw_status_bar();
+    // g.setColor(TFT_GREEN);
     g.print("DONE", cols[18], rows[4]); // KWP 5 baud init done
-    g.setColor(TFT_BLUE);
-    g.print("-> Read ECU data...", LEFT, rows[8]);
+    // g.setColor(TFT_BLUE);
+    // g.print("-> Read ECU data...", LEFT, rows[8]);
     debugln(F("ReadConnectBlocks"));
     if (!readConnectBlocks(true))
     {
