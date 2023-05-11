@@ -2882,6 +2882,11 @@ void setup()
                     user_pressed_connect = true;
                     g.print("->Connect<-", CENTER, rows[18]);
                 }
+                else if (userinput_ecu_address == 1)
+                {
+                    user_pressed_connect = true;
+                    g.print("->Connect<-", CENTER, rows[18]);
+                }
                 else
                 {
                     g.setColor(TFT_RED);
