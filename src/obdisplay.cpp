@@ -18,7 +18,7 @@ Ignore compile warnings.
 /* --------------------------EDIT THE FOLLOWING TO YOUR LIKING-------------------------------------- */
 
 /* Config */
-#define DEBUG 1                  // 1 = enable Serial.print
+#define DEBUG 0                  // 1 = enable Serial.print
 #define ECU_TIMEOUT 1300         // Most commonly is 1100ms
 #define DISPLAY_FRAME_LENGTH 111 // Length of 1 frame in ms
 #define DISPLAY_MAX_X 480
@@ -1246,9 +1246,9 @@ void disconnect()
  */
 void obdWrite(uint8_t data)
 {
-    //debug(F("->MCU: "));
-    //debughexln(data);
-    uint8_t to_delay = 5;
+    // debug(F("->MCU: "));
+    // debughexln(data);
+    uint8_t to_delay = 10;
     switch (baud_rate)
     {
     case 1200:
@@ -1259,9 +1259,6 @@ void obdWrite(uint8_t data)
         break;
     case 4800:
         to_delay = 15;
-        break;
-    case 9600:
-        to_delay = 10;
         break;
     }
 
@@ -1286,8 +1283,8 @@ uint8_t obdRead()
         }
     }
     uint8_t data = obd.read();
-    //debug(F("ECU: "));
-    //debughexln(data);
+    // debug(F("ECU: "));
+    // debughexln(data);
     return data;
 }
 
@@ -1352,7 +1349,7 @@ bool KWP5BaudInit(uint8_t addr)
 {
     debug(F("5 baud: (0)"));
     send5baud(addr);
-    //debugln(F(" (9) END"));
+    // debugln(F(" (9) END"));
     return true;
 }
 
@@ -1414,7 +1411,7 @@ bool KWPSendBlock(char *s, int size)
 bool KWPSendAckBlock()
 {
 
-    //debugstrnumln(F("---KWPSendAckBlock block counter = "), block_counter);
+    // debugstrnumln(F("---KWPSendAckBlock block counter = "), block_counter);
     char buf[32];
     buf[0] = 0x03;
     buf[1] = block_counter;
@@ -1485,7 +1482,7 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
     }
     unsigned long timeout = millis() + timeout_to_add;
     uint16_t temp_iteration_counter = 0;
-    while ((recvcount == 0) || (recvcount != size))
+    while ((recvcount == 0) || (recvcount < size))
     {
         while (obd.available())
         {
@@ -1575,10 +1572,10 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
             }
             timeout = millis() + timeout_to_add;
 
-            //debugstrnum(F("Rcvcnt: "), (uint8_t)recvcount);
-            //debug(F(" Data: "));
-            //debughex(data);
-            // debugstrnumln(F(". ACK compl: "), ((!ackeachbyte) && (recvcount == size)) || ((ackeachbyte) && (recvcount < size)));
+            // debugstrnum(F("Rcvcnt: "), (uint8_t)recvcount);
+            // debug(F(" Data: "));
+            // debughex(data);
+            //  debugstrnumln(F(". ACK compl: "), ((!ackeachbyte) && (recvcount == size)) || ((ackeachbyte) && (recvcount < size)));
         }
 
         if (millis() >= timeout)
@@ -1603,16 +1600,16 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
         temp_iteration_counter++;
     }
     // show data
-    //debug(F("IN: size = "));
-    //debug(size);
-    //debug(F(" data = "));
-    //for (uint8_t i = 0; i < size; i++)
+    // debug(F("IN: size = "));
+    // debug(size);
+    // debug(F(" data = "));
+    // for (uint8_t i = 0; i < size; i++)
     //{
     //    uint8_t data = s[i];
     //    debughex(data);
     //    debug(F(" "));
     //}
-    debugln();
+    //debugln();
     increase_block_counter();
     return true;
 }
@@ -1678,7 +1675,7 @@ bool KWPReceiveAckBlock()
  */
 bool readConnectBlocks(bool initialization_phase = false)
 {
-    //debugln(F(" - Readconnectblocks"));
+    // debugln(F(" - Readconnectblocks"));
 
     String info;
     while (true)
@@ -1722,7 +1719,7 @@ bool readConnectBlocks(bool initialization_phase = false)
             return false;
         }
     }
-    //debugstrnum(F("label = "), info);
+    // debugstrnum(F("label = "), info);
     return true;
 }
 
@@ -2542,7 +2539,9 @@ bool kwp_exit()
 bool obd_connect()
 {
     debugln(F("Connecting to ECU"));
+
     block_counter = 0;
+
     g.print("Press enter->", LEFT, rows[3]);
     while (true)
     {
@@ -2551,22 +2550,18 @@ bool obd_connect()
             break;
     }
     g.print("OBD.begin()...", LEFT, rows[3]);
+    obd.begin(baud_rate); // 9600 for 0x01, 10400 for other addresses, 1200 for very old ECU < 1996
     draw_status_bar();
     g.setColor(TFT_GREEN);
     g.print("DONE", cols[14], rows[3]);
     g.setColor(TFT_BLUE);
     g.print("-> KWP5BaudInit...", cols[0], rows[4]);
     debugln(F("Init "));
-    obd.begin(baud_rate); // Baud rate 9600 for Golf 4/Bora or 10400 in weird cases
-    if (!KWP5BaudInit(addr_selected))
-    {
-        draw_status_bar();
-        g.setColor(TFT_RED);
-        g.print("ERROR", cols[18], rows[4]);
-        g.setColor(font_color);
-        return false;
-    }
-    // draw_status_bar();
+
+    KWP5BaudInit(addr_selected);
+
+    draw_status_bar();
+    
     char response[3] = {0, 0, 0}; // Response should be (0x55, 0x01, 0x8A)base=16 = (85 1 138)base=2
     int response_size = 3;
     // g.print("-> Handshake(hex)...", cols[0], rows[5]);
@@ -2684,76 +2679,6 @@ bool connect()
         if (debug_mode_enabled)
             g.print("DEBUG", 150, rows[2]);
     }
-
-    // Connect to ECU
-    connection_attempts_counter++;
-    if (!obd_connect())
-    {
-        disconnect();
-        return false;
-    }
-    connect_time_start = millis();
-    menu_switch = true;
-    return true;
-}
-
-/**
- * @brief One time startup sequence for the microcontroller.
- *
- */
-void setup()
-{
-
-    // Serial for debug
-#if DEBUG == 1
-    Serial.begin(9600);
-#endif
-
-    // Display
-    g.InitLCD(LANDSCAPE);
-    g.clrScr();
-    g.fillScr(back_color);
-    // g.setFont(SmallFont);
-    g.setBackColor(back_color);
-    g.setColor(font_color);
-    g.setFont(BigFont);
-
-    // Setup pins
-    pinMode(pin_tx, OUTPUT); // TX
-    digitalWrite(pin_tx, HIGH);
-    pinMode(buttonPin_RST, INPUT_PULLUP); // Joystick
-    pinMode(buttonPin_SET, INPUT_PULLUP);
-    pinMode(buttonPin_MID, INPUT_PULLUP);
-    pinMode(buttonPin_RHT, INPUT_PULLUP);
-    pinMode(buttonPin_LFT, INPUT_PULLUP);
-    pinMode(buttonPin_DWN, INPUT_PULLUP);
-    pinMode(buttonPin_UP, INPUT_PULLUP);
-
-    startup_animation();
-
-    // Testing
-    // char testing_character = 'a';
-    // for (int x = 0; x < 20; x++) {
-    //    for (int y = 0; y < 30; y++) {
-    //        if (x==0){
-    //            if (y==0)
-    //                g.print("Testing Hello! LOLOLOLOLOLOLOL", cols[0], rows[x]);
-    //            continue;
-    //        }
-    //        g.print(String(testing_character), cols[y], rows[x]);
-    //        if (testing_character == 'z')
-    //            testing_character = 'a';
-    //        else
-    //            testing_character++;
-    //        delay(33);
-    //    }
-    //}
-    // exit(0);
-
-    // TODO EEPROM setup (V_MAX, Fault codes, alarms counter)
-
-    // Test everything
-    // display_row_test();
 
     // Startup configuration
     bool userinput_simulation_mode = true;
@@ -2956,12 +2881,61 @@ void setup()
     // Clear used rows
     for (uint8_t row : used_rows)
         clearRow(row);
+
     debugln(F("Saved configuration: "));
     debugstrnumln(F("--- DEBUG_SERIAL "), DEBUG);
     debugstrnumln(F("--- DEBUG_MODE "), debug_mode_enabled);
     debugstrnumln(F("--- SIMULATION "), simulation_mode_active);
     debugstrnumln(F("--- baud "), baud_rate);
     debugstrnumhexln(F("--- addr "), addr_selected);
+
+    // Connect to ECU
+    connection_attempts_counter++;
+    if (!simulation_mode_active && !obd_connect())
+    {
+        disconnect();
+        return false;
+    }
+    if (simulation_mode_active)
+        connected = true;
+    connect_time_start = millis();
+    menu_switch = true;
+    return true;
+}
+
+/**
+ * @brief One time startup sequence for the microcontroller.
+ *
+ */
+void setup()
+{
+
+    // Serial for debug
+#if DEBUG == 1
+    Serial.begin(9600);
+#endif
+
+    // Display
+    g.InitLCD(LANDSCAPE);
+    g.clrScr();
+    g.fillScr(back_color);
+    // g.setFont(SmallFont);
+    g.setBackColor(back_color);
+    g.setColor(font_color);
+    g.setFont(BigFont);
+
+    // Setup pins
+    pinMode(pin_tx, OUTPUT); // TX
+    digitalWrite(pin_tx, HIGH);
+    pinMode(buttonPin_RST, INPUT_PULLUP); // Joystick
+    pinMode(buttonPin_SET, INPUT_PULLUP);
+    pinMode(buttonPin_MID, INPUT_PULLUP);
+    pinMode(buttonPin_RHT, INPUT_PULLUP);
+    pinMode(buttonPin_LFT, INPUT_PULLUP);
+    pinMode(buttonPin_DWN, INPUT_PULLUP);
+    pinMode(buttonPin_UP, INPUT_PULLUP);
+
+    startup_animation();
 }
 
 /**
