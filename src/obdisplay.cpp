@@ -2643,6 +2643,7 @@ bool obd_connect()
     // g.print("DONE", cols[18], rows[4]); // KWP 5 baud init done
     // g.setColor(TFT_BLUE);
     // g.print("-> Read ECU data...", LEFT, rows[8]);
+    // TEST
     if (!readConnectBlocks(true))
     {
         draw_status_bar();
