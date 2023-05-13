@@ -20,7 +20,7 @@ Ignore compile warnings.
 /* Config */
 #define DEBUG 1                  // 1 = enable Serial.print
 #define ECU_TIMEOUT 1300         // Most commonly is 1100ms
-#define DISPLAY_FRAME_LENGTH 111 // Length of 1 frame in ms
+#define DISPLAY_FRAME_LENGTH 333 // Length of 1 frame in ms
 #define DISPLAY_MAX_X 480
 #define DISPLAY_MAX_Y 320
 bool simulation_mode_active = false; // If simulation mode is active the device will display imaginary values
@@ -680,8 +680,8 @@ void init_status_bar()
     g.print("CON:   | AVA:     ", LEFT, rows[1]);
     g.drawLine(0, rows[2], 480, rows[2]);
     g.printNumI(block_counter, cols[7], rows[0], 3, '0');
-    g.printChar(com_error, cols[22], rows[0]);
-    g.printChar(com_error, cols[5], rows[1]);
+    g.printNumI(com_error, cols[22], rows[0]);
+    g.printNumI(com_error, cols[5], rows[1]);
     g.printNumI(available(), cols[14], rows[1], 3, '0');
 }
 void draw_status_bar()
@@ -701,7 +701,7 @@ void draw_status_bar()
         }
         else
             g.setColor(TFT_GREEN);
-        g.printChar(com_error, cols[22], rows[0]);
+        g.printNumI(com_error, cols[22], rows[0]);
         com_error_last = com_error;
         g.setColor(font_color);
     }
@@ -713,7 +713,7 @@ void draw_status_bar()
         }
         else
             g.setColor(TFT_GREEN);
-        g.printChar(com_error, cols[5], rows[1]);
+        g.printNumI(com_error, cols[5], rows[1]);
         connected_last = connected;
         g.setColor(font_color);
     }
@@ -2866,6 +2866,9 @@ void setup()
 void loop()
 {
 
+    uint32_t loop_start_time = millis();
+    uint64_t loop_start_time_micros = micros();
+
     if (!connected && !connect())
     {
         return;
@@ -2910,7 +2913,7 @@ void loop()
     else
     {
         simulate_values();
-        delay(50);
+        // delay(50);
     }
 
     // Compute stats
@@ -2969,56 +2972,73 @@ void loop()
             button_read_time = millis() + 333;
     }
 
-    // Perform menu switch or update values on current menu
-    if (menu_switch)
+    if (millis() > display_frame_timestamp)
     {
-        g.fillScr(back_color);
-        init_status_bar();
-        switch (menu)
+
+        // Perform menu switch or update values on current menu
+        if (menu_switch)
         {
-        case 0:
-            init_menu_cockpit();
-            display_menu_cockpit(true);
-            break;
-        case 1:
-            init_menu_experimental();
-            break;
-        case 2:
-            init_menu_debug();
-            break;
-        case 3:
-            init_menu_dtc();
-            break;
-        case 4:
-            init_menu_settings();
-            break;
-        }
-        menu_switch = false;
-    }
-    else
-    {
-        if (millis() >= display_frame_timestamp)
-        {
-            draw_status_bar();
+            uint32_t menu_switch_start_time = millis();
+            g.fillScr(back_color);
+            init_status_bar();
             switch (menu)
             {
             case 0:
-                display_menu_cockpit();
+                init_menu_cockpit();
+                display_menu_cockpit(true);
                 break;
             case 1:
-                display_menu_experimental();
+                init_menu_experimental();
                 break;
             case 2:
-                display_menu_debug();
+                init_menu_debug();
                 break;
             case 3:
-                display_menu_dtc();
+                init_menu_dtc();
                 break;
             case 4:
-                display_menu_settings();
+                init_menu_settings();
                 break;
             }
+            menu_switch = false;
             display_frame_timestamp = millis() + DISPLAY_FRAME_LENGTH;
+            g.printNumI(millis() - menu_switch_start_time, LEFT, rows[19]);
         }
+        else
+        {
+
+            if (millis() >= display_frame_timestamp)
+            {
+                uint32_t frame_start_time = millis();
+                draw_status_bar();
+                switch (menu)
+                {
+                case 0:
+                    display_menu_cockpit();
+                    break;
+                case 1:
+                    display_menu_experimental();
+                    break;
+                case 2:
+                    display_menu_debug();
+                    break;
+                case 3:
+                    display_menu_dtc();
+                    break;
+                case 4:
+                    display_menu_settings();
+                    break;
+                }
+                display_frame_timestamp = millis() + DISPLAY_FRAME_LENGTH;
+                g.printNumI(millis() - frame_start_time, RIGHT, rows[19]);
+            }
+        }
+        g.printNumI((millis() - loop_start_time), LEFT, rows[18], 4, ' ');
+        g.printNumI(1000000 / (micros() - loop_start_time_micros), RIGHT, rows[17], 3, ' ');
+    }
+    else
+    {
+        g.printNumI((millis() - loop_start_time), LEFT, rows[17], 4, ' ');
+        g.printNumI(1000000 / (micros() - loop_start_time_micros), RIGHT, rows[16], 3, ' ');
     }
 }
