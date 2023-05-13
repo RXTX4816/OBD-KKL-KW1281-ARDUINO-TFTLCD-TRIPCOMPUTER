@@ -18,27 +18,14 @@ Ignore compile warnings.
 /* --------------------------EDIT THE FOLLOWING TO YOUR LIKING-------------------------------------- */
 
 /* Config */
-#define DEBUG 0                  // 1 = enable Serial.print
+#define DEBUG 1                  // 1 = enable Serial.print
 #define ECU_TIMEOUT 1300         // Most commonly is 1100ms
 #define DISPLAY_FRAME_LENGTH 111 // Length of 1 frame in ms
 #define DISPLAY_MAX_X 480
 #define DISPLAY_MAX_Y 320
-bool no_input_mode = false; // If you have no buttons connected, mainly used for fast testing
-bool auto_setup = false;
 bool simulation_mode_active = false; // If simulation mode is active the device will display imaginary values
 bool debug_mode_enabled = false;
-bool compute_stats = false; // Whether statistic values should be computed (Fuel/100km etc.) Remember division is expensive on these processors.
 
-/* ECU Addresses. See info.txt in root directory for details on the values of each group. */
-const uint8_t ADDR_ENGINE = 0x01;
-const uint8_t ADDR_ABS_BRAKES = 0x03; // UNUSED
-const uint8_t ADDR_AUTO_HVAC = 0x08;  // UNUSED
-const uint8_t ADDR_INSTRUMENTS = 0x17;
-const uint8_t ADDR_CENTRAL_CONV = 0x46;
-
-/* Pins */
-uint8_t pin_rx = 12; // Receive // Black
-uint8_t pin_tx = 11; // Transmit // White
 // Five direction joystick
 const int buttonPin_RST = 13; // reset
 const int buttonPin_SET = 2;  // set
@@ -48,10 +35,28 @@ const int buttonPin_LFT = 5;  // left
 const int buttonPin_DWN = 6;  // down
 const int buttonPin_UP = 7;   // up
 
+/* Pins */
+uint8_t pin_rx = 12; // Receive // Black
+uint8_t pin_tx = 11; // Transmit // White
+
+/* ECU Addresses. See info.txt in root directory for details on the values of each group. */
+const uint8_t ADDR_ENGINE = 0x01;
+const uint8_t ADDR_ABS_BRAKES = 0x03; // UNUSED
+const uint8_t ADDR_AUTO_HVAC = 0x08;  // UNUSED
+const uint8_t ADDR_INSTRUMENTS = 0x17;
+const uint8_t ADDR_CENTRAL_CONV = 0x46;
+
 /* --------------------------EDIT BELOW ONLY TO FIX STUFF-------------------------------------- */
 
+// Constants
+const uint8_t KWP_MODE_ACK = 0;         // Send ack block to keep connection alive
+const uint8_t KWP_MODE_READSENSORS = 1; // Read all sensors from the connected ADDR
+const uint8_t KWP_MODE_READGROUP = 2;   // Read only specified group from connected ADDR
+const char CHAR_YES = 'Y';
+const char CHAR_NO = 'N';
+
 /* Display:
-Top status bar: OBD Connected, Backend connected, OBD available, block counter, com_warning status, engine cold (Blue rectangle)
+Top status bar: OBD Connected, Backend connected, OBD available, block counter, com_error status, engine cold (Blue rectangle)
 */
 const int rows[20] = {1, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 272, 288, 304};
 const int cols[30] = {1, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464};
@@ -66,8 +71,6 @@ UTFT g(CTE40, 38, 39, 40, 41); // Graphics g
 word back_color = TFT_WHITE;
 word font_color = TFT_BLACK;
 String simulation_mode = "";
-const char CHAR_YES = 'Y';
-const char CHAR_NO = 'N';
 uint32_t display_frame_timestamp = millis();
 
 /* Menu:
@@ -88,6 +91,9 @@ unsigned long button_read_time = 0;
 unsigned long connect_time_start = millis();
 unsigned long timeout_to_add = 1100; // Wikipedia
 unsigned long button_press_delay = 222;
+uint8_t kwp_mode = KWP_MODE_READSENSORS;
+uint8_t kwp_mode_last = kwp_mode;
+uint8_t kwp_group = 1; // Dont go to group 0 its not good.
 // Menu 0 Cockpit view
 int engine_rpm_x1 = cols[20];
 int engine_rpm_y1 = rows[7];
@@ -117,58 +123,55 @@ byte setting_brightness_last = setting_brightness;
 char setting_contrast = 30; // max 64
 byte setting_contrast_last = setting_contrast;
 
-// EEPROM local variables // TODO maybe use something different
-// int v_max = -1;
-// int fault_codes_count = -1;
-// int errors_count = -1;
-// EEPROM Storage Addresses
-// int v_max_addr = 0;             // Store the maximum speed
-// int fault_codes_count_addr = 1; // Amount of fault codes
-// int errors_count_addr = 2;      // Amount of obdisplay errors (calculations, serial communication, display)
-
 // OBD Connection variables
 bool connected = false;
 bool connected_last = connected; // Connection with ECU active
 int available_last = 0;
-int baud_rate = 0; // 1200, 2400, 4800, 9600, 10400
-unsigned int block_counter = 0;
-unsigned int block_counter_last = block_counter; // Could be byte maybe?
-uint8_t addr_selected = 0x00;                    // Selected ECU address to connect to, see ECU Addresses constants
+uint16_t baud_rate = 0; // 1200, 2400, 4800, 9600, 10400
+uint8_t block_counter = 0;
+uint8_t block_counter_last = block_counter; // Could be byte maybe?
+uint8_t addr_selected = 0x00;               // Selected ECU address to connect to, see ECU Addresses constants
 bool com_error = false;
-bool com_warning = false;
-bool com_warning_last = com_warning; // Whether a communication warning occured // Block length warning. Expected 15 got " + String(data)
+bool com_error_last = com_error; // Whether a communication warning occured // Block length warning. Expected 15 got " + String(data)
 
 /*Temporary Measurements for if you want to find out which values show up in your groups in a desired ECU address.
-Just uncomment and add the logic in readSensors(). This can also be done with VCDS or other tools.*/
+Just uncomment and add the logic in read_sensors(). This can also be done with VCDS or other tools.*/
 byte k[4] = {0, 0, 0, 0};
 float v[4] = {-1, -1, -1, -1};
 uint8_t k_temp[4] = {0, 0, 0, 0};
 bool k_temp_updated = false;
-float v_temp[4] = {-1, -1, -1, -1};
+float v_temp[4] = {123.4, 123.4, 123.4, 123.4};
 bool v_temp_updated = false;
-char STRING_ERR[] = "ERR";
-String unit_temp[4] = {STRING_ERR, STRING_ERR, STRING_ERR, STRING_ERR};
+String unit_temp[4] = {"N/A", "N/A", "N/A", "N/A"};
 bool unit_temp_updated = false;
 void reset_temp_group_array()
 {
     for (uint8_t i = 0; i < 4; i++)
     {
         k_temp[i] = 0;
-        v_temp[i] = 0;
-        unit_temp[i] = STRING_ERR;
+        v_temp[i] = 123.4;
+        unit_temp[i] = "N/A";
     }
 }
 // DTC error
-uint16_t dtc_errors[16] = {0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000};
+uint16_t dtc_errors[16] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
 bool dtc_errors_updated = false;
-uint8_t dtc_status_bytes[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+uint8_t dtc_status_bytes[16] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 bool dtc_status_bytes_updated = false;
 void reset_dtc_status_errors_array()
 {
-    for (uint8_t i = 0; i < 8; i++)
+    for (uint8_t i = 0; i < 16; i++)
     {
-        dtc_errors[i] = 0x0000;
-        dtc_status_bytes[i] = 0x00;
+        dtc_errors[i] = (uint16_t)0xFFFF;
+        dtc_status_bytes[i] = 0xFF;
+    }
+}
+void reset_dtc_status_errors_array_random()
+{
+    for (uint8_t i = 0; i < 16; i++)
+    {
+        dtc_errors[i] = (uint16_t)(i * 1000);
+        dtc_status_bytes[i] = i * 10;
     }
 }
 
@@ -266,6 +269,12 @@ bool fuel_per_hour_updated = false;
         debug(str);             \
         debugln(num);           \
     } while (0)
+#define debugstrnumhex(str, num) \
+    do                           \
+    {                            \
+        debug(str);              \
+        debughex(num);           \
+    } while (0)
 #define debugstrnumhexln(str, num) \
     do                             \
     {                              \
@@ -279,6 +288,7 @@ bool fuel_per_hour_updated = false;
 #define debughexln(in)
 #define debugstrnum(str, num)
 #define debugstrnumln(str, num)
+#define debugstrnumhex(str, num)
 #define debugstrnumhexln(str, num)
 #endif
 
@@ -293,33 +303,6 @@ uint8_t count_digit(int n)
         ++count;
     }
     return count;
-}
-
-/**
- * @brief Converts a boolean to a String
- *
- * @param value Boolean
- * @return String Y or N
- */
-String convert_bool_string(bool value)
-{
-    if (value)
-    {
-        return String(CHAR_YES);
-    }
-    else
-    {
-        return String(CHAR_NO);
-    }
-}
-char convert_bool_char(bool value)
-{
-    if (value)
-    {
-        return CHAR_YES;
-    }
-    else
-        return CHAR_NO;
 }
 
 // Button state functions
@@ -683,23 +666,9 @@ void startup_animation()
         // g.fillRect(4+i*59+j, rows[17], 4+i*59+59, rows[17]+12);
     }
     clearRow(17);
-    if (mid_click())
-    {
-        delay(333);
-        if (mid_click())
-        {
-            delay(333);
-            if (mid_click())
-            {
-                delay(333);
-                auto_setup = true;
-            }
-        }
-    }
-    else
-    {
-        delay(222);
-    }
+
+    delay(222);
+
     // g.fillScr(back_color);
     g.setColor(font_color);
     clearRow(3);
@@ -711,8 +680,8 @@ void init_status_bar()
     g.print("CON:   | AVA:     ", LEFT, rows[1]);
     g.drawLine(0, rows[2], 480, rows[2]);
     g.printNumI(block_counter, cols[7], rows[0], 3, '0');
-    g.printChar(convert_bool_char(com_warning), cols[22], rows[0]);
-    g.printChar(convert_bool_char(com_warning), cols[5], rows[1]);
+    g.printChar(com_error, cols[22], rows[0]);
+    g.printChar(com_error, cols[5], rows[1]);
     g.printNumI(available(), cols[14], rows[1], 3, '0');
 }
 void draw_status_bar()
@@ -724,16 +693,16 @@ void draw_status_bar()
         g.printNumI(block_counter, cols[7], rows[0], 3, '0');
         block_counter_last = block_counter;
     }
-    if (com_warning != com_warning_last)
+    if (com_error != com_error_last)
     {
-        if (com_warning)
+        if (com_error)
         {
             g.setColor(TFT_RED);
         }
         else
             g.setColor(TFT_GREEN);
-        g.printChar(convert_bool_char(com_warning), cols[22], rows[0]);
-        com_warning_last = com_warning;
+        g.printChar(com_error, cols[22], rows[0]);
+        com_error_last = com_error;
         g.setColor(font_color);
     }
     if (connected != connected_last)
@@ -744,7 +713,7 @@ void draw_status_bar()
         }
         else
             g.setColor(TFT_GREEN);
-        g.printChar(convert_bool_char(com_warning), cols[5], rows[1]);
+        g.printChar(com_error, cols[5], rows[1]);
         connected_last = connected;
         g.setColor(font_color);
     }
@@ -887,7 +856,7 @@ void init_menu_settings()
     g.print("Settings", LEFT, rows[4]);
     g.print("Night mode:", LEFT, rows[6]);
     g.print("-->", CENTER, rows[6]);
-    g.print(convert_bool_string(setting_night_mode), RIGHT, rows[6]);
+    g.print(String(setting_night_mode), RIGHT, rows[6]);
     g.print("Brightness*:", LEFT, rows[7]);
     g.printNumI(setting_brightness, RIGHT, rows[7], 3, '0');
     g.print("Contrast*:", LEFT, rows[8]);
@@ -1183,7 +1152,7 @@ void display_menu_settings()
     if (setting_night_mode_last != setting_night_mode)
     {
         setting_night_mode_last = setting_night_mode;
-        g.print(convert_bool_string(setting_night_mode_last), RIGHT, rows[6]);
+        g.print(String(setting_night_mode_last), RIGHT, rows[6]);
     }
     if (setting_brightness_last != setting_brightness)
     {
@@ -1244,21 +1213,22 @@ void disconnect()
  *
  * @param data The data to send.
  */
-void obdWrite(uint8_t data)
+void OBD_write(uint8_t data)
 {
     // debug(F("->MCU: "));
     // debughexln(data);
-    uint8_t to_delay = 10;
+    uint8_t to_delay = 5;
     switch (baud_rate)
     {
     case 1200:
-        to_delay = 25;
-        break;
     case 2400:
-        to_delay = 20;
-        break;
     case 4800:
-        to_delay = 15;
+        to_delay = 15; // For old ECU's
+        break;
+    case 9600:
+        to_delay = 10;
+        break;
+    default:
         break;
     }
 
@@ -1271,14 +1241,14 @@ void obdWrite(uint8_t data)
  *
  * @return uint8_t The incoming byte or -1 if timeout
  */
-uint8_t obdRead()
+int16_t OBD_read()
 {
     unsigned long timeout = millis() + timeout_to_add;
     while (!obd.available())
     {
         if (millis() >= timeout)
         {
-            debugln(F("ERROR: obdRead() timeout obd.available() = 0."));
+            debugln(F("ERROR: OBD_read() timeout obd.available() = 0."));
             return -1;
         }
     }
@@ -1293,7 +1263,7 @@ uint8_t obdRead()
  * 5Bd, 7O1
  * @param data Which ECU Address to wake up.
  */
-void send5baud(uint8_t data)
+void KWP_5baud_send(uint8_t data)
 {
     // // 1 start bit, 7 data bits, 1 parity, 1 stop bit
 #define bitcount 10
@@ -1348,7 +1318,7 @@ void send5baud(uint8_t data)
 bool KWP5BaudInit(uint8_t addr)
 {
     debug(F("5 baud: (0)"));
-    send5baud(addr);
+    KWP_5baud_send(addr);
     // debugln(F(" (9) END"));
     return true;
 }
@@ -1361,37 +1331,27 @@ bool KWP5BaudInit(uint8_t addr)
  * @return true If no errors occured, will resume
  * @return false If errors occured, will disconnect
  */
-bool KWPSendBlock(char *s, int size)
+bool KWP_send_block(uint8_t *s, int size)
 {
-    debug(F("---KWPSend size = "));
-    debug(size);
-    debug(F(" block counter = "));
-    debugln(block_counter);
-    debug(F("To send: "));
+    debug(F("Sending "));
     for (uint8_t i = 0; i < size; i++)
     {
-        uint8_t data = s[i];
-        debughex(data);
-        debug(" ");
+        debughex(s[i]);
+        debug(F(" "));
     }
     debugln();
 
-    for (int i = 0; i < size; i++)
+    for (uint8_t i = 0; i < size; i++)
     {
         uint8_t data = s[i];
-        obdWrite(data);
-        /*uint8_t echo = obdRead(); ???
-        if (data != echo){
-          Serial.println(F("ERROR: invalid echo"));
-          disconnect();
-          errorData++;
-          return false;
-        }*/
+        OBD_write(data);
         if (i < size - 1)
         {
-            uint8_t complement = obdRead();
+            uint8_t complement = OBD_read();
             if (complement != (data ^ 0xFF))
             {
+                debugstrnumhex(F("MCU: "), data);
+                debugstrnumhex(F(" ECU: "), complement);
                 debugln(F("ERROR: invalid complement"));
                 return false;
             }
@@ -1408,50 +1368,31 @@ bool KWPSendBlock(char *s, int size)
  * @return true No errors
  * @return false Errors, disconnect
  */
-bool KWPSendAckBlock()
+bool KWP_send_ACK_block()
 {
-
-    // debugstrnumln(F("---KWPSendAckBlock block counter = "), block_counter);
-    char buf[32];
-    buf[0] = 0x03;
-    buf[1] = block_counter;
-    buf[2] = 0x09;
-    buf[3] = 0x03;
-    return (KWPSendBlock(buf, 4));
+    // debugln(F("Sending ACK block"));
+    uint8_t buf[4] = {0x03, block_counter, 0x09, 0x03};
+    return (KWP_send_block(buf, 4));
 }
 
 /**
  * Sends DTC read block and obtains all DTC errors
  */
-bool KWPSendDTCReadBlock()
+bool KWP_send_DTC_read_block()
 {
-    debugstrnumln(F("---KWPSendDTCReadBlock block counter = "), block_counter);
-
-    char s[32];
-    s[0] = 0x03;
-    s[1] = block_counter;
-    s[2] = 0x07;
-    s[3] = 0x03;
-    if (!KWPSendBlock(s, 4))
-        return false;
-    return true;
+    debugln(F("Sending DTC read block"));
+    uint8_t s[32] = {0x03, block_counter, 0x07, 0x03};
+    return KWP_send_block(s, 4);
 }
 
 /**
  * Sends DTC delete block to clear all DTC errors
  */
-bool KWPSendDTCDeleteBlock()
+bool KWP_send_DTC_delete_block()
 {
-    debugstrnumln(F("---KWPSendDTCDeleteBlock block counter = "), block_counter);
-
-    char s[32];
-    s[0] = 0x03;
-    s[1] = block_counter;
-    s[2] = 0x05;
-    s[3] = 0x03;
-    if (!KWPSendBlock(s, 4))
-        return false;
-    return true;
+    debugln(F("Sending DTC delete block"));
+    uint8_t s[32] = {0x03, block_counter, 0x05, 0x03};
+    return KWP_send_block(s, 4);
 }
 
 /**
@@ -1464,15 +1405,15 @@ bool KWPSendDTCDeleteBlock()
  * @return true No errors
  * @return false Errors
  */
-bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool initialization_phase = false)
+bool KWP_receive_block(uint8_t s[], int maxsize, int &size, int source = -1, bool initialization_phase = false)
 {
     bool ackeachbyte = false;
-    uint8_t data = 0;
+    int16_t data = 0;
     int recvcount = 0;
     if (size == 0)
         ackeachbyte = true;
 
-    // debugstrnum(F(" - KWPReceiveBlock. Size: "), size);
+    // debugstrnum(F(" - KWP_receive_block. Size: "), size);
     // debugstrnum(F(". Block counter: "), block_counter);
 
     if (size > maxsize)
@@ -1482,25 +1423,64 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
     }
     unsigned long timeout = millis() + timeout_to_add;
     uint16_t temp_iteration_counter = 0;
-    while ((recvcount == 0) || (recvcount < size))
+    uint8_t temp_0x0F_counter = 0; // For communication errors in startup procedure (1200 baud)
+    while ((recvcount == 0) || (recvcount != size))
     {
         while (obd.available())
         {
 
-            data = obdRead();
+            data = OBD_read();
             if (data == -1)
             {
-                debugln(F(" - KWPReceiveBlock error: (Available=0) or empty buffer!"));
+                debugln(F(" - KWP_receive_block error: (Available=0) or empty buffer!"));
                 return false;
             }
             s[recvcount] = data;
             recvcount++;
+            /* BAUD 1200 fix, may be useful for other bauds if com errors occur at sync bytes init */
+            if (initialization_phase && (recvcount > maxsize))
+            {
+                if (data == 0x55)
+                {
+                    temp_0x0F_counter = 0; // Reset
+                    s[0] = 0x00;
+                    s[1] = 0x00;
+                    s[2] = 0x00;
+                    size = 3;
+                    recvcount = 1;
+                    s[0] = 0x55;
+                    timeout = millis() + timeout_to_add;
+                }
+                else if (data == 0xFF)
+                {
+                    temp_0x0F_counter = 0; // Skip
+                }
+                else if (data == 0x0F)
+                {
+                    if (temp_0x0F_counter >= 1) // ACK
+                    {
+                        OBD_write(data ^ 0xFF);
+                        timeout = millis() + timeout_to_add;
+
+                        temp_0x0F_counter = 0;
+                    }
+                    else // Skip
+                    {
+                        temp_0x0F_counter++;
+                    }
+                }
+                else
+                {
+                    temp_0x0F_counter = 0; // Skip
+                }
+                continue;
+            }
+
             if ((size == 0) && (recvcount == 1))
             {
                 if (source == 1 && (data != 15 || data != 3) && obd.available())
                 {
-                    debugln(F(" - KWPReceiveBlock warn: Communication error occured, check block length!"));
-                    com_warning = true;
+                    debugln(F(" - KWP_receive_block warn: Communication error occured, check block length!"));
                     com_error = true;
                     size = 6;
                 }
@@ -1512,7 +1492,7 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
                 {
                     if (initialization_phase)
                     {
-                        debugln(F(" - KWPReceiveBlock error: Invalid maxsize"));
+                        debugln(F(" - KWP_receive_block error: Invalid maxsize"));
                         g.setColor(TFT_RED);
                         g.print("   ERROR: size > maxsize", cols[0], rows[7]);
                         g.setColor(font_color);
@@ -1520,7 +1500,7 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
                     return false;
                 }
             }
-            if (com_warning)
+            if (com_error)
             {
                 if (recvcount == 1)
                 {
@@ -1544,31 +1524,25 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
             {
                 if (data != block_counter)
                 {
-                    debugstrnum(F(" - KWPReceiveBlock error: Invalid block counter. Expected: "), (uint8_t)data);
-                    debugstrnumln(F(" Is: "), (uint8_t)block_counter);
-                    if (initialization_phase)
+                    if (data == 0x00)
+                        block_counter = 0; // Reset BC because probably com error occured in init phase. Part of 1200BAUD fix
+                    else
                     {
+                        debugstrnum(F(" - KWP_receive_block error: Invalid block counter. Expected: "), block_counter);
+                        debugstrnumln(F(" Is: "), data);
                         g.setColor(TFT_RED);
                         g.print("   BLCK CNTR Exp     Curr    ", cols[0], rows[7]);
                         g.printNumI(data, cols[17], rows[7], 3, '0');
 
                         g.printNumI(block_counter, cols[26], rows[7], 3, '0');
                         g.setColor(font_color);
+                        return false;
                     }
-                    return false;
                 }
             }
             if (((!ackeachbyte) && (recvcount == size)) || ((ackeachbyte) && (recvcount < size)))
             {
-                obdWrite(data ^ 0xFF); // send complement ack
-                /*uint8_t echo = obdRead();
-                if (echo != (data ^ 0xFF)){
-                  Serial.print(F("ERROR: invalid echo "));
-                  Serial.println(echo, HEX);
-                  disconnect();
-                  errorData++;
-                  return false;
-                }*/
+                OBD_write(data ^ 0xFF); // send complement ack
             }
             timeout = millis() + timeout_to_add;
 
@@ -1581,7 +1555,7 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
         if (millis() >= timeout)
         {
 
-            debug(F(" - KWPReceiveBlock: Timeout overstepped on iteration "));
+            debug(F(" - KWP_receive_block: Timeout overstepped on iteration "));
             debug(temp_iteration_counter);
             debug(F(" with receivecount "));
             debugln(recvcount);
@@ -1592,7 +1566,7 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
             if (initialization_phase)
             {
                 g.setColor(TFT_RED);
-                g.print("   ERROR Timeout", cols[0], rows[7]);
+                g.print("   ERROR Timeout ", cols[0], rows[7]);
                 g.setColor(font_color);
             }
             return false;
@@ -1609,20 +1583,15 @@ bool KWPReceiveBlock(char s[], int maxsize, int &size, int source = -1, bool ini
     //    debughex(data);
     //    debug(F(" "));
     //}
-    //debugln();
+    // debugln();
     increase_block_counter();
     return true;
 }
 
-bool KWPErrorBlock()
+bool KWP_error_block()
 {
-    // Kommunikationsfehler
-    char s[64];
-    s[0] = 0x03;
-    s[1] = block_counter;
-    s[2] = 0x00;
-    s[3] = 0x03;
-    if (!KWPSendBlock(s, 4))
+    uint8_t s[64] = {0x03, block_counter, 0x00, 0x03};
+    if (!KWP_send_block(s, 4))
     {
         com_error = false;
         return false;
@@ -1630,38 +1599,26 @@ bool KWPErrorBlock()
     block_counter = 0;
     com_error = false;
     int size2 = 0;
-    if (!KWPReceiveBlock(s, 64, size2))
-    {
-        return false;
-    }
-    return true;
+    return KWP_receive_block(s, 64, size2);
 }
 
-bool KWPReceiveAckBlock()
+bool KWP_receive_ACK_block()
 {
     // --------- Expect response acknowledge ----------------
-    char buf[32];
+    uint8_t buf[32];
     int size2 = 0;
-    if (!KWPReceiveBlock(buf, 4, size2))
+    if (!KWP_receive_block(buf, 32, size2))
     {
         return false;
     }
-    if (buf[0] != 0x03 || buf[2] != 0x09 || buf[3] != 0x03)
+    if (buf[2] != 0x09)
     {
-        debug(F(" - Error receiving ACK procedure got s[0]-s[3]: "));
-        debughex(buf[0]);
-        debug(F(" "));
-        debughex(buf[1]);
-        debug(F(" "));
-        debughex(buf[2]);
-        debug(F(" "));
-        debughex(buf[3]);
-        debugln(F(" should be 03 BC 09 03"));
+        debug(F(" - Error receiving ACK procedure"));
         return false;
     }
     if (com_error)
     {
-        KWPErrorBlock();
+        KWP_error_block();
         return false;
     }
     return true;
@@ -1673,16 +1630,16 @@ bool KWPReceiveAckBlock()
  * @return true no errors
  * @return false errors
  */
-bool readConnectBlocks(bool initialization_phase = false)
+bool read_connect_blocks(bool initialization_phase = false)
 {
     // debugln(F(" - Readconnectblocks"));
 
-    String info;
+    // String info;
     while (true)
     {
         int size = 0;
-        char s[64];
-        if (!(KWPReceiveBlock(s, 64, size, -1, initialization_phase)))
+        uint8_t s[64];
+        if (!(KWP_receive_block(s, 64, size, -1, initialization_phase)))
         {
             if (initialization_phase)
                 g.print("   ERROR receiving", cols[0], rows[9]);
@@ -1697,20 +1654,21 @@ bool readConnectBlocks(bool initialization_phase = false)
             }
             return false;
         }
-        if (s[2] == '\x09')
+        if (s[2] == 0x09)
             break;
-        if (s[2] != '\xF6')
+        if (s[2] != 0xF6)
         {
-            debugln(F(" - Readconnectblocks ERROR: unexpected answer"));
+            debug(F(" - Readconnectblocks ERROR: unexpected answer: "));
+            debugstrnumhexln(F("should be 0xF6 but is "), s[2]);
             if (initialization_phase)
             {
                 g.print("   ERROR Exp 0xF6 Got 0xXX", cols[0], rows[9]); // Todo hex notation
             }
             return false;
         }
-        String text = String(s);
-        info += text.substring(3, size - 2);
-        if (!KWPSendAckBlock())
+        // String text = String(s);
+        // info += text.substring(3, size - 2);
+        if (!KWP_send_ACK_block())
         {
             if (initialization_phase)
             {
@@ -1730,53 +1688,47 @@ bool readConnectBlocks(bool initialization_phase = false)
  * @return true no errors
  * @return false errors
  */
-bool readSensors(int group)
+bool read_sensors(int group)
 {
-    debugstrnum(F(" - ReadSensors group "), group);
+    // debugstrnum(F(" - ReadSensors group "), group);
 
-    for (int i = 0; i <= 3; i++)
-    {
-        k_temp[i] = 0;
-        v_temp[i] = -1;
-        unit_temp[i] = "ERR";
-    }
-    char s[64];
+    uint8_t s[64];
     s[0] = 0x04;
     s[1] = block_counter;
     s[2] = 0x29;
     s[3] = group;
     s[4] = 0x03;
-    if (!KWPSendBlock(s, 5))
+    if (!KWP_send_block(s, 5))
         return false;
     int size = 0;
-    if (!KWPReceiveBlock(s, 64, size, 1))
+    if (!KWP_receive_block(s, 64, size, 1))
     {
         return false;
     }
-    if (com_warning)
+    if (com_error)
     {
         // Kommunikationsfehler
-        char s[64];
+        uint8_t s[64];
         s[0] = 0x03;
         s[1] = block_counter;
         s[2] = 0x00;
         s[3] = 0x03;
-        if (!KWPSendBlock(s, 4))
+        if (!KWP_send_block(s, 4))
         {
-            com_warning = false;
+            com_error = false;
             return false;
         }
         block_counter = 0;
-        com_warning = false;
+        com_error = false;
         int size2 = 0;
-        if (!KWPReceiveBlock(s, 64, size2))
+        if (!KWP_receive_block(s, 64, size2))
         {
             return false;
         }
     }
-    if (s[2] != '\xe7')
+    if (s[2] != 0xE7)
     {
-        debugln(F("ERROR: invalid answer"));
+        debugln(F("ERROR: invalid answer 0xE7"));
         return false;
     }
     int count = (size - 4) / 3;
@@ -2366,35 +2318,18 @@ bool readSensors(int group)
             break;
         }
     }
-    /*if (units.length() != 0) {
-        dtostrf(v, 4, 2, buf);
-        t = String(buf) + " " + units;
-      }
-  //    Serial.println(t);
-
-      //lcd.setCursor(0, idx);
-      //while (t.length() < 20) t += " ";
-      //lcd.print(t);
-    }
-    sensorCounter++;*/
     return true;
 }
 
 /**
  * KW1281 procedure to send a simple acknowledge block to keep the connection alive
  */
-bool send_ack(bool expect_response_ack = true)
+bool keep_alive(bool expect_response_ack = true)
 {
-    if (!KWPSendAckBlock())
+    if (!KWP_send_ACK_block())
         return false;
 
-    if (!expect_response_ack)
-        return true;
-
-    if (!KWPReceiveAckBlock())
-        return false;
-
-    return true;
+    return KWP_receive_ACK_block();
 }
 
 /**
@@ -2402,102 +2337,86 @@ bool send_ack(bool expect_response_ack = true)
  *
  * @return 0=false, 1=true, 2=true_no_errors_found
  */
-uint8_t read_DTC_codes()
+int8_t read_DTC_codes()
 {
-    debug(F("Read DTC on ADDR 0x"));
-    debughexln(addr_selected);
-
-    if (!KWPSendDTCReadBlock())
-        return false;
-
-    reset_dtc_status_errors_array();
-    bool all_dtc_errors_received = false;
-    uint8_t dtc_errors_received_counter = 0;
-    char s[64];
-    int size = 0;
-    while (!all_dtc_errors_received)
+    if (simulation_mode_active)
     {
-        if (!KWPReceiveBlock(s, 64, size, 1))
-        {
-            return false;
-        }
-        if (com_error)
-        {
-            // Kommunikationsfehler
-            KWPErrorBlock();
-            return false;
-        }
-
-        if (s[2] == 0xFC)
-        {
-            // Read next DTC error block
-            if (s[3] == 0xFF && s[4] == 0xFF && s[5] == 0x88)
-            {
-                // No DTC errors found
-                debugln(F("No DTC codes found"));
-                return 2;
-            }
-            else
-            {
-                // Extract DTC errors
-                uint8_t block_length = s[0];
-                uint8_t dtc_error_amount = (uint8_t)((block_length - 3) / 3);
-                if (dtc_error_amount < 1 || dtc_error_amount > 4)
-                {
-                    debugln(F("DTC wrong amount of DTC errors"));
-                    return false;
-                }
-                for (int i = 0; i < dtc_error_amount; i++)
-                {
-                    uint8_t byte_high = s[3 + 3 * i];
-                    uint8_t byte_low = s[3 + 3 * i + 1];
-                    uint8_t byte_status = s[3 + 3 * i + 2];
-                    dtc_errors[i + dtc_errors_received_counter * 4] = byte_low | (byte_high << 8);
-                    dtc_status_bytes[i + dtc_errors_received_counter * 4] = byte_status;
-                }
-                debug(F("DTC errors: "));
-                for (int i = 0; i < dtc_error_amount; i++)
-                {
-                    debug(i);
-                    debug(F(" = "));
-                    debughex(dtc_errors[i]);
-                    debug(F(" | "));
-                }
-                debugln(F(""));
-                debug(F("DTC Status bytes: "));
-                for (int i = 0; i < dtc_error_amount; i++)
-                {
-                    debug(i);
-                    debug(F(" = "));
-                    debughex(dtc_status_bytes[i]);
-                    debug(F(" | "));
-                }
-                debugln(F(""));
-                dtc_errors_received_counter++;
-                if (dtc_errors_received_counter > 3)
-                {
-                    debugln(F("Too much errors to receive. INCREASE ARRAY SIZE!"));
-                    all_dtc_errors_received = true;
-                    continue;
-                }
-            }
-        }
-        else if (s[2] == 0x09)
-        {
-            // No more DTC error blocks
-            all_dtc_errors_received = true;
-            continue;
-        }
-        else
-        {
-            debugln(F("DTC wrong block title"));
-        }
+        reset_dtc_status_errors_array_random();
+        return 0;
     }
 
-    if (!KWPSendAckBlock())
-        return false;
+    if (!KWP_send_DTC_read_block())
+        return -1;
 
-    return true;
+    reset_dtc_status_errors_array();
+    uint8_t dtc_counter = 0;
+    uint8_t s[64];
+    while (true)
+    {
+        int size = 0;
+        if (!KWP_receive_block(s, 64, size))
+            return -1;
+
+        // if (com_error)
+        //{
+        //   // Kommunikationsfehler
+        //   KWP_error_block();
+        //   return false;
+        // }
+
+        if (s[2] == 0x09) // No more DTC error blocks
+            break;
+        if (s[2] != 0xFC)
+        {
+            debugln(F("DTC wrong block title"));
+            return -1;
+        }
+
+        // Extract DTC errors
+        int count = (size - 4) / 3;
+        for (int i = 0; i < count; i++)
+        {
+            uint8_t byte_high = s[3 + 3 * i];
+            uint8_t byte_low = s[3 + 3 * i + 1];
+            uint8_t byte_status = s[3 + 3 * i + 2];
+
+            if (byte_high == 0xFF && byte_low == 0xFF && byte_status == 0x88)
+                debugln(F("No DTC codes found")); // return 2;
+            else
+            {
+                uint16_t dtc = (byte_high << 8) + byte_low;
+                // if (dtcCounter >= startFrom && dtcCounter - startFrom < amount)
+                dtc_errors[dtc_counter] = dtc;
+                dtc_status_bytes[dtc_counter] = byte_status;
+                dtc_counter++;
+            }
+        }
+        if (!KWP_send_ACK_block())
+        {
+            return -1;
+        }
+
+        /* debug(F("DTC errors: "));
+        for (int i = 0; i < count; i++)
+        {
+          debug(i);
+          debug(F(" = "));
+          debughex(dtc_errors[i]);
+          debug(F(" | "));
+        }
+        debugln(F(""));
+        debug(F("DTC Status bytes: "));
+        for (int i = 0; i < count; i++)
+        {
+          debug(i);
+          debug(F(" = "));
+          debughex(dtc_status_bytes[i]);
+          debug(F(" | "));
+        }
+        debugln(F("")); */
+    }
+
+    return dtc_counter;
 }
 
 /**
@@ -2505,7 +2424,19 @@ uint8_t read_DTC_codes()
  */
 bool delete_DTC_codes()
 {
-    if (!KWPSendDTCDeleteBlock())
+
+    if (simulation_mode_active)
+        return true;
+
+    if (!KWP_send_DTC_delete_block())
+        return false;
+
+    int size = 0;
+    uint8_t s[64];
+    if (!KWP_receive_block(s, 64, size))
+        return false;
+
+    if (s[2] != 0x09) // Expect ACK
         return false;
 
     return true;
@@ -2519,12 +2450,12 @@ bool kwp_exit()
     debugln(F("Manual KWP exit.."));
     // Perform KWP end output block
     delay(15);
-    char s[64];
+    uint8_t s[64];
     s[0] = 0x03;
     s[1] = block_counter;
     s[2] = 0x06;
     s[3] = 0x03;
-    if (!KWPSendBlock(s, 4))
+    if (!KWP_send_block(s, 4))
     {
         debugln(F("KWP exit failed"));
         return false;
@@ -2550,7 +2481,6 @@ bool obd_connect()
             break;
     }
     g.print("OBD.begin()...", LEFT, rows[3]);
-    obd.begin(baud_rate); // 9600 for 0x01, 10400 for other addresses, 1200 for very old ECU < 1996
     draw_status_bar();
     g.setColor(TFT_GREEN);
     g.print("DONE", cols[14], rows[3]);
@@ -2558,16 +2488,17 @@ bool obd_connect()
     g.print("-> KWP5BaudInit...", cols[0], rows[4]);
     debugln(F("Init "));
 
+    obd.begin(baud_rate); // 9600 for 0x01, 10400 for other addresses, 1200 for very old ECU < 1996
     KWP5BaudInit(addr_selected);
 
-    draw_status_bar();
-    
-    char response[3] = {0, 0, 0}; // Response should be (0x55, 0x01, 0x8A)base=16 = (85 1 138)base=2
+    // draw_status_bar();
+
+    uint8_t response[3] = {0, 0, 0}; // Response should be (0x55, 0x01, 0x8A)base=16 = (85 1 138)base=2
     int response_size = 3;
     // g.print("-> Handshake(hex)...", cols[0], rows[5]);
     // g.print("   Exp 55 01 8A Got ", cols[0], rows[6]);
 
-    if (!KWPReceiveBlock(response, 3, response_size, -1, true))
+    if (!KWP_receive_block(response, 3, response_size, -1, true))
     {
         draw_status_bar();
         g.setColor(TFT_RED);
@@ -2580,19 +2511,10 @@ bool obd_connect()
         g.print("ERROR", cols[20], rows[5]);
         g.setColor(font_color);
 
-        debug(F("Handshake error expected ["));
-        debughex(0x55);
-        debug(F(" "));
-        debughex(0x01);
-        debug(F(" "));
-        debughex(0x8A);
-        debug(F("] got ["));
-        debughex((uint8_t)response[0]);
-        debug(F(" "));
-        debughex((uint8_t)response[1]);
-        debug(F(" "));
-        debughex((uint8_t)response[2]);
-        debugln(F("]"));
+        debug(F("Handshake error got "));
+        debugstrnumhex(F(" "), response[0]);
+        debugstrnumhex(F(" "), response[1]);
+        debugstrnumhexln(F(" "), response[2]);
 
         delay(1111);
 
@@ -2612,21 +2534,13 @@ bool obd_connect()
         g.print("ERROR", cols[20], rows[5]);
         g.setColor(font_color);
 
-        debug(F("Handshake error expected ["));
-        debughex(0x55);
-        debug(F(" "));
-        debughex(0x01);
-        debug(F(" "));
-        debughex(0x8A);
-        debug(F("] got ["));
-        debughex((uint8_t)response[0]);
-        debug(F(" "));
-        debughex((uint8_t)response[1]);
-        debug(F(" "));
-        debughex((uint8_t)response[2]);
-        debugln(F("]"));
+        debug(F("Handshake error got "));
+        debugstrnumhex(F(" "), response[0]);
+        debugstrnumhex(F(" "), response[1]);
+        debugstrnumhexln(F(" "), response[2]);
 
         delay(1111);
+        return false;
     }
     // draw_status_bar();
     // g.setColor(TFT_GREEN);
@@ -2639,8 +2553,12 @@ bool obd_connect()
     // g.setColor(TFT_BLUE);
     // g.print("-> Read ECU data...", LEFT, rows[8]);
     // TEST
-    if (!readConnectBlocks(true))
+    if (!read_connect_blocks(false))
     {
+        debugln(F(" "));
+        debugln(F("------"));
+        debugln(F("ECU connection failed"));
+        debugln(F("------"));
         draw_status_bar();
         g.setColor(TFT_RED);
         g.print("ERROR", cols[19], rows[8]);
@@ -2650,7 +2568,10 @@ bool obd_connect()
     // g.setColor(TFT_GREEN);
     // g.print("DONE", cols[19], rows[8]);
     // g.setColor(TFT_BLUE);
+    debugln(F(" "));
+    debugln(F("------"));
     debugln(F("ECU connected"));
+    debugln(F("------"));
 
     connected = true;
     // draw_status_bar();
@@ -2709,181 +2630,179 @@ bool connect()
 
     init_status_bar();
     draw_status_bar();
-    if (!no_input_mode && !auto_setup)
-    {
-        uint8_t userinput_current_row = 10;
-        uint8_t userinput_previous_row = 10;
-        bool user_pressed_connect = false;
-        bool setup_config_button_pressed = false;
-        while (!user_pressed_connect)
-        {
-            draw_status_bar();
-            // User input
-            if (up_click())
-            {
-                userinput_previous_row = userinput_current_row;
-                if (userinput_current_row <= 10)
-                {
-                    userinput_current_row = 18;
-                }
-                else if (userinput_current_row > 13)
-                {
-                    userinput_current_row = 13;
-                }
-                else
-                {
-                    userinput_current_row--;
-                }
-                setup_config_button_pressed = true;
-            }
-            else if (down_click())
-            {
-                userinput_previous_row = userinput_current_row;
-                if (userinput_current_row < 13)
-                {
-                    userinput_current_row++;
-                }
-                else if (userinput_current_row == 13)
-                {
-                    userinput_current_row = 18;
-                }
-                else
-                {
-                    userinput_current_row = 10;
-                }
-                setup_config_button_pressed = true;
-            }
-            else if ((userinput_current_row == 10) && (right_click() || left_click()))
-            {
-                // Boolean switch
-                userinput_simulation_mode = !userinput_simulation_mode;
-                setup_config_button_pressed = true;
-            }
-            else if ((userinput_current_row == 12) && (right_click() || left_click()))
-            {
-                // Boolean switch
-                userinput_debug_mode = !userinput_debug_mode;
-                setup_config_button_pressed = true;
-            }
-            else if ((userinput_current_row == 13) && (right_click() || left_click()))
-            {
-                // Boolean switch
-                if (userinput_ecu_address == 1)
-                {
-                    userinput_ecu_address = 17;
-                }
-                else if (userinput_ecu_address == 17)
-                {
-                    userinput_ecu_address = 1; // Not supported currently
-                }
-                else
-                {
-                    userinput_ecu_address = 17;
-                }
-                setup_config_button_pressed = true;
-            }
-            else if (right_click() && userinput_current_row == 11)
-            {
-                if (supported_baud_rates_counter >= supported_baud_rates_max)
-                    supported_baud_rates_counter = 0;
-                else
-                    supported_baud_rates_counter++;
-                userinput_baudrate = supported_baud_rates[supported_baud_rates_counter];
-                setup_config_button_pressed = true;
-            }
-            else if (left_click() && userinput_current_row == 11)
-            {
-                if (supported_baud_rates_counter <= 0)
-                    supported_baud_rates_counter = supported_baud_rates_max;
-                else
-                    supported_baud_rates_counter--;
-                userinput_baudrate = supported_baud_rates[supported_baud_rates_counter];
-                setup_config_button_pressed = true;
-            }
-            else if (mid_click() && userinput_current_row == 18)
-            {
-                if (userinput_ecu_address == 17)
-                {
-                    user_pressed_connect = true;
-                    g.print("->Connect<-", CENTER, rows[18]);
-                }
-                else if (userinput_ecu_address == 1)
-                {
-                    user_pressed_connect = true;
-                    g.print("->Connect<-", CENTER, rows[18]);
-                }
-                else
-                {
-                    g.setColor(TFT_RED);
-                    for (int i = 0; i < 5; i++)
-                    {
-                        g.print("!ECU Addr not supported!", CENTER, rows[17]);
-                        delay(333);
-                        g.print("                        ", CENTER, rows[17]);
-                        delay(33);
-                    }
-                    g.setColor(font_color);
-                }
-                setup_config_button_pressed = true;
-            }
-            // Draw arrow
-            if (userinput_current_row != userinput_previous_row)
-            {
-                g.print("   ", LEFT, rows[userinput_previous_row]);
-                g.print("-->", LEFT, rows[userinput_current_row]);
-            }
-            // Display updated setting values
-            if (userinput_simulation_mode != userinput_simulation_mode_previous)
-            {
-                if (userinput_simulation_mode)
-                    g.print("SIM", RIGHT, rows[10]);
-                else
-                    g.print("ECU", RIGHT, rows[10]);
-                userinput_simulation_mode_previous = userinput_simulation_mode;
-            }
-            if (userinput_baudrate != userinput_baudrate_previous)
-            {
-                g.printNumI(userinput_baudrate, RIGHT, rows[11], 5, '0');
-                userinput_baudrate_previous = userinput_baudrate;
-            }
-            if (userinput_debug_mode != userinput_debug_mode_previous)
-            {
-                g.print(convert_bool_string(userinput_debug_mode), RIGHT, rows[12]);
-                userinput_debug_mode_previous = userinput_debug_mode;
-            }
-            if (userinput_ecu_address != userinput_ecu_address_previous)
-            {
 
-                g.printNumI(userinput_ecu_address, cols[28], rows[13], 2, '0');
-                userinput_ecu_address_previous = userinput_ecu_address;
-            }
-            // Userinput delay
-            if (setup_config_button_pressed)
+    uint8_t userinput_current_row = 10;
+    uint8_t userinput_previous_row = 10;
+    bool user_pressed_connect = false;
+    bool setup_config_button_pressed = false;
+    while (!user_pressed_connect)
+    {
+        draw_status_bar();
+        // User input
+        if (up_click())
+        {
+            userinput_previous_row = userinput_current_row;
+            if (userinput_current_row <= 10)
             {
-                setup_config_button_pressed = false;
-                delay(button_press_delay);
+                userinput_current_row = 18;
             }
+            else if (userinput_current_row > 13)
+            {
+                userinput_current_row = 13;
+            }
+            else
+            {
+                userinput_current_row--;
+            }
+            setup_config_button_pressed = true;
         }
-        // Update values
-        simulation_mode_active = userinput_simulation_mode;
-        baud_rate = userinput_baudrate;
-        debug_mode_enabled = userinput_debug_mode;
-        if (userinput_ecu_address == 17)
+        else if (down_click())
         {
-            addr_selected = ADDR_INSTRUMENTS;
+            userinput_previous_row = userinput_current_row;
+            if (userinput_current_row < 13)
+            {
+                userinput_current_row++;
+            }
+            else if (userinput_current_row == 13)
+            {
+                userinput_current_row = 18;
+            }
+            else
+            {
+                userinput_current_row = 10;
+            }
+            setup_config_button_pressed = true;
         }
-        else
+        else if ((userinput_current_row == 10) && (right_click() || left_click()))
         {
-            addr_selected = ADDR_ENGINE;
+            // Boolean switch
+            userinput_simulation_mode = !userinput_simulation_mode;
+            setup_config_button_pressed = true;
+        }
+        else if ((userinput_current_row == 12) && (right_click() || left_click()))
+        {
+            // Boolean switch
+            userinput_debug_mode = !userinput_debug_mode;
+            setup_config_button_pressed = true;
+        }
+        else if ((userinput_current_row == 13) && (right_click() || left_click()))
+        {
+            // Boolean switch
+            if (userinput_ecu_address == 1)
+            {
+                userinput_ecu_address = 17;
+            }
+            else if (userinput_ecu_address == 17)
+            {
+                userinput_ecu_address = 1; // Not supported currently
+            }
+            else
+            {
+                userinput_ecu_address = 17;
+            }
+            setup_config_button_pressed = true;
+        }
+        else if (right_click() && userinput_current_row == 11)
+        {
+            if (supported_baud_rates_counter >= supported_baud_rates_max)
+                supported_baud_rates_counter = 0;
+            else
+                supported_baud_rates_counter++;
+            userinput_baudrate = supported_baud_rates[supported_baud_rates_counter];
+            setup_config_button_pressed = true;
+        }
+        else if (left_click() && userinput_current_row == 11)
+        {
+            if (supported_baud_rates_counter <= 0)
+                supported_baud_rates_counter = supported_baud_rates_max;
+            else
+                supported_baud_rates_counter--;
+            userinput_baudrate = supported_baud_rates[supported_baud_rates_counter];
+            setup_config_button_pressed = true;
+        }
+        else if (mid_click() && userinput_current_row == 18)
+        {
+            if (userinput_ecu_address == 17)
+            {
+                user_pressed_connect = true;
+                g.print("->Connect<-", CENTER, rows[18]);
+            }
+            else if (userinput_ecu_address == 1)
+            {
+                user_pressed_connect = true;
+                g.print("->Connect<-", CENTER, rows[18]);
+            }
+            else
+            {
+                g.setColor(TFT_RED);
+                for (int i = 0; i < 5; i++)
+                {
+                    g.print("!ECU Addr not supported!", CENTER, rows[17]);
+                    delay(333);
+                    g.print("                        ", CENTER, rows[17]);
+                    delay(33);
+                }
+                g.setColor(font_color);
+            }
+            setup_config_button_pressed = true;
+        }
+        // Draw arrow
+        if (userinput_current_row != userinput_previous_row)
+        {
+            g.print("   ", LEFT, rows[userinput_previous_row]);
+            g.print("-->", LEFT, rows[userinput_current_row]);
+        }
+        // Display updated setting values
+        if (userinput_simulation_mode != userinput_simulation_mode_previous)
+        {
+            if (userinput_simulation_mode)
+                g.print("SIM", RIGHT, rows[10]);
+            else
+                g.print("ECU", RIGHT, rows[10]);
+            userinput_simulation_mode_previous = userinput_simulation_mode;
+        }
+        if (userinput_baudrate != userinput_baudrate_previous)
+        {
+            g.printNumI(userinput_baudrate, RIGHT, rows[11], 5, '0');
+            userinput_baudrate_previous = userinput_baudrate;
+        }
+        if (userinput_debug_mode != userinput_debug_mode_previous)
+        {
+            g.print(String(userinput_debug_mode), RIGHT, rows[12]);
+            userinput_debug_mode_previous = userinput_debug_mode;
+        }
+        if (userinput_ecu_address != userinput_ecu_address_previous)
+        {
+
+            g.printNumI(userinput_ecu_address, cols[28], rows[13], 2, '0');
+            userinput_ecu_address_previous = userinput_ecu_address;
+        }
+        // Userinput delay
+        if (setup_config_button_pressed)
+        {
+            setup_config_button_pressed = false;
+            delay(button_press_delay);
         }
     }
+    // Update values
+    simulation_mode_active = userinput_simulation_mode;
+    baud_rate = userinput_baudrate;
+    debug_mode_enabled = userinput_debug_mode;
+    if (userinput_ecu_address == 17)
+    {
+        addr_selected = ADDR_INSTRUMENTS;
+    }
+    else
+    {
+        addr_selected = ADDR_ENGINE;
+    }
+
     delay(333);
     // Clear used rows
     for (uint8_t row : used_rows)
         clearRow(row);
 
     debugln(F("Saved configuration: "));
-    debugstrnumln(F("--- DEBUG_SERIAL "), DEBUG);
     debugstrnumln(F("--- DEBUG_MODE "), debug_mode_enabled);
     debugstrnumln(F("--- SIMULATION "), simulation_mode_active);
     debugstrnumln(F("--- baud "), baud_rate);
@@ -2936,6 +2855,8 @@ void setup()
     pinMode(buttonPin_UP, INPUT_PULLUP);
 
     startup_animation();
+
+    reset_dtc_status_errors_array();
 }
 
 /**
@@ -2953,19 +2874,43 @@ void loop()
     // Update values
     if (!simulation_mode_active)
     {
-        // Read the sensor groups
-        for (int i = 1; i <= 3; i++)
+        switch (kwp_mode)
         {
-            if (!readSensors(i))
+        case KWP_MODE_ACK:
+            if (!keep_alive())
             {
                 disconnect();
                 return;
             }
+            break;
+        case KWP_MODE_READGROUP:
+            if (!read_sensors(kwp_group))
+            {
+                disconnect();
+                return;
+            }
+            break;
+        case KWP_MODE_READSENSORS:
+            // Read the sensor groups
+            for (int i = 1; i <= 3; i++)
+            {
+                if (!read_sensors(i))
+                {
+                    disconnect();
+                    return;
+                }
+            }
+            break;
+        default:
+            debugln(F("Kwp_mode undefined EXIT"));
+
+            break;
         }
     }
     else
     {
         simulate_values();
+        delay(50);
     }
 
     // Compute stats
